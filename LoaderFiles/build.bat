@@ -1,0 +1,1 @@
+call LoaderFiles/x64/setup_x64.bat  && call cl /LD -I"LoaderFiles/x64/mono-2.0" ./LoaderFiles/loader/code.cpp
