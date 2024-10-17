@@ -1,5 +1,4 @@
-﻿
-#define PAYLOAD_NAMESPACE "RSM" // Change to your namespace (This will depend on what your namespace in your C# code is)
+﻿#define PAYLOAD_NAMESPACE "RSM" // Change to your namespace (This will depend on what your namespace in your C# code is)
 #define PAYLOAD_CLASS "Loader" // Leave same
 #define PAYLOAD_MAIN "Init" // Leave same
 #define MONO_DLL L"mono-2.0-bdwgc.dll" // Leave same
@@ -102,12 +101,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
 		break;
 	case DLL_THREAD_DETACH:
 		break;
-	case DLL_PROCESS_DETACH:{
+	case DLL_PROCESS_DETACH:
 		
-		
-		fnMonoAssemblyClose(assembly);
 		break;
-	}
 	}
 	return TRUE;
 }
