@@ -20,7 +20,7 @@ typedef MonoObject* (__cdecl* t_mono_runtime_invoke)(MonoMethod*, void*, void**,
 t_mono_runtime_invoke fnRuntimeInvoke;
 typedef const char* (__cdecl* t_mono_assembly_getrootdir)(void);
 t_mono_assembly_getrootdir fnGetRootDir;
-
+typedef MonoObject* (__cdecl* t_mono_object_new)(MonoDomain*, MonoClass*);
 
 typedef void (*t_mono_assembly_close)(MonoAssembly*);
 typedef MonoClass* (__cdecl* t_mono_object_get_class)(MonoObject*);
@@ -29,6 +29,18 @@ typedef const char* (__cdecl* t_mono_class_get_namespace)(MonoClass*);
 typedef char* (__cdecl* t_mono_string_to_utf8)(MonoString*);
 typedef void(__cdecl* t_mono_free)(void*);
 typedef void(__cdecl* t_mono_string_free)(char*);
+typedef void(__cdecl* t_mono_runtime_object_init)(MonoObject*);
+typedef void(__cdecl* t_mono_thread_detach)(MonoDomain*);
+typedef void(__cdecl* t_mono_gc_collect)(int);
+typedef int(__cdecl* t_mono_gc_max_generation)(void);
+typedef void(__cdecl* t_mono_domain_unload)(MonoDomain*); 
+typedef MonoImage* (__cdecl* t_mono_image_open_from_data)(char*, uint32_t, mono_bool, MonoImageOpenStatus*);
+typedef MonoAssembly* (__cdecl* t_mono_assembly_load_from)(MonoImage*, const char*, MonoImageOpenStatus*);
+typedef const char* (__cdecl* t_mono_image_get_name)(MonoImage*);
+typedef MonoDomain* (__cdecl* t_mono_domain_get_normal)(void);
+typedef void(__cdecl* t_mono_image_init)(MonoImage*);
+typedef MonoDomain*(__cdecl* t_mono_domain_create_appdomain)(char*, char*);
+typedef void(__cdecl* t_mono_domain_set)(MonoDomain*, mono_bool);
 
 t_mono_assembly_close fnMonoAssemblyClose;
 t_mono_object_get_class fnObjectGetClass;
@@ -37,10 +49,22 @@ t_mono_class_get_namespace fnClassGetNamespace;
 t_mono_string_to_utf8 fnStringToUtf8;
 t_mono_free fnMonoFree;
 t_mono_string_free fnStringFree;
+t_mono_object_new fnMonoObjectNew;
+t_mono_runtime_object_init fnMonoRuntimeObjectInit;
+t_mono_thread_detach fnMonoThreadDetach;
+t_mono_gc_collect fnMonoGcCollect;
+t_mono_gc_max_generation fnMonoGcMaxGen;
+t_mono_domain_unload fnMonoDomainUnload;
+t_mono_image_open_from_data fnMonoImageOpenFromData;
+t_mono_assembly_load_from fnMonoAssemblyLoadFrom;
+t_mono_image_get_name fnMonoImageGetName;
+t_mono_domain_get_normal fnMonoDomainGetNormal;
+t_mono_image_init fnMonoImageInit;
+t_mono_domain_create_appdomain fnMonoCreateAppdomain;
+t_mono_domain_set fnMonoDomainSet;
 
-MonoDomain* domain = nullptr; // Глобальная переменная для хранения домена
-MonoClass* klass = nullptr;
-MonoAssembly* assembly = nullptr;
+MonoAssembly* assembly;
+MonoDomain* domain1;
 
 void initMonoFunctions(HMODULE mono) {
 	fnMonoAssemblyClose = (t_mono_assembly_close)GetProcAddress(mono, "mono_assembly_close");
@@ -58,7 +82,21 @@ void initMonoFunctions(HMODULE mono) {
 	fnStringToUtf8 = (t_mono_string_to_utf8)GetProcAddress(mono, "mono_string_to_utf8");
 	fnMonoFree = (t_mono_free)GetProcAddress(mono, "mono_free");
 	fnStringFree = (t_mono_string_free)GetProcAddress(mono, "mono_string_free");
+	fnMonoObjectNew = (t_mono_object_new)GetProcAddress(mono, "mono_object_new");
+	fnMonoRuntimeObjectInit = (t_mono_runtime_object_init)GetProcAddress(mono, "mono_runtime_object_init");
+	fnMonoThreadDetach = (t_mono_thread_detach)GetProcAddress(mono, "mono_thread_detach");
+	fnMonoGcCollect = (t_mono_gc_collect)GetProcAddress(mono, "mono_gc_collect");
+	fnMonoGcMaxGen = (t_mono_gc_max_generation)GetProcAddress(mono, "mono_gc_max_generation");
+	fnMonoDomainUnload = (t_mono_domain_unload)GetProcAddress(mono, "mono_domain_unload");
+	fnMonoImageOpenFromData = (t_mono_image_open_from_data)GetProcAddress(mono, "mono_image_open_from_data");
+	fnMonoAssemblyLoadFrom = (t_mono_assembly_load_from)GetProcAddress(mono, "mono_assembly_load_from");
+	fnMonoImageGetName = (t_mono_image_get_name)GetProcAddress(mono, "mono_image_get_name");
+	fnMonoImageInit = (t_mono_image_init)GetProcAddress(mono, "mono_image_init");
+	fnMonoDomainGetNormal = (t_mono_domain_get_normal)GetProcAddress(mono, "mono_domain_get_normal");
+	fnMonoCreateAppdomain = (t_mono_domain_create_appdomain)GetProcAddress(mono, "mono_domain_create_appdomain");
+	fnMonoDomainSet = (t_mono_domain_set)GetProcAddress(mono, "mono_domain_set");
 }
+
 
 void InjectMonoAssembly() {
 	std::string assemblyDir;
@@ -66,6 +104,9 @@ void InjectMonoAssembly() {
 	HMODULE mono;
 	MonoImage* image;
 	MonoMethod* method;
+	MonoDomain* domain; // Глобальная переменная для хранения домена
+	MonoClass* klass;
+
 
 	/* grab the mono dll module */
 	mono = LoadLibraryW(MONO_DLL);
@@ -78,20 +119,30 @@ void InjectMonoAssembly() {
 	assemblyDir.append(fnGetRootDir());
 	assemblyDir.append(ASSEMBLY_PATH);
 	/* open payload assembly */
-	assembly = fnAssemblyOpen(assemblyDir.c_str(), NULL);
-	if (assembly == NULL) return;
-	/* get image from assembly */
-	image = fnAssemblyGetImage(assembly);
+	domain1 = fnMonoCreateAppdomain((char*)assemblyDir.c_str(), nullptr);
+	fnMonoDomainSet(domain1, 0);
+	
+	std::ifstream file(assemblyDir.c_str(), std::ios::binary);
+	std::vector<char> buffer((std::istreambuf_iterator<char>(file)), {});
+
+	MonoImageOpenStatus status;
+	image = fnMonoImageOpenFromData((char*)buffer.data(), (uint32_t)buffer.size(), 1, &status);
+	fnMonoImageInit(image);
+	assembly = fnMonoAssemblyLoadFrom(image, "", &status);
 	if (image == NULL) return;
 	/* grab the class */
 	klass = fnClassFromName(image, PAYLOAD_NAMESPACE, PAYLOAD_CLASS);
 	if (klass == NULL) return;
+	MonoObject* result = fnMonoObjectNew(domain1, klass);
+	fnMonoRuntimeObjectInit(result);
 	/* grab the hack entrypoint */
 	method = fnMethodFromName(klass, PAYLOAD_MAIN, 0);
 	if (method == NULL) return;
 	/* call our entrypoint */
-	fnRuntimeInvoke(method, NULL, NULL, NULL);
+	fnRuntimeInvoke(method, result, NULL, NULL);
 }
+
+
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved) {
 	switch (ul_reason_for_call)
@@ -102,7 +153,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
 	case DLL_THREAD_DETACH:
 		break;
 	case DLL_PROCESS_DETACH:
-		
 		break;
 	}
 	return TRUE;
